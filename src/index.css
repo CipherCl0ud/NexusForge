@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  .liquid-glass {
+    @apply bg-gradient-to-br from-white/10 to-transparent backdrop-blur-xl border border-white/20;
+  }
+}
+
+body, html {
+  @apply bg-[#0a0a0a] text-slate-200 m-0 p-0 overflow-x-hidden min-h-screen;
+  scroll-behavior: smooth;
+}
+
+/* ── PREMIUM SCROLLBAR DESIGN ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Hide scrollbar on glass panels until hovered for a super clean look */
+.glass-panel::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.glass-panel:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+.glass-panel:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}

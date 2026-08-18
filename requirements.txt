@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+opencv-python
+numpy
+onnxruntime-gpu
+rembg
+PyMuPDF
+pypdf
+requests
+gpxpy

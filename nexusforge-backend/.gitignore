@@ -1,0 +1,10 @@
+# Python environment
+venv/
+__pycache__/
+*.pyc
+
+# AI Models & Temp Data
+models/
+temp_data/
+*.onnx
+*.zip
