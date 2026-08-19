@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Home, Search, Command, Image as ImageIcon, FileText, Video, Terminal, LayoutGrid } from 'lucide-react';
+
+// Create a motion-powered React Router Link component
+const MotionLink = motion(Link);
 
 // Helper to assign the correct icon based on your category labels
 const getIconForCategory = (label) => {
@@ -12,7 +16,7 @@ const getIconForCategory = (label) => {
   return <LayoutGrid size={16} />;
 };
 
-export default function Sidebar({ categories, activeCategory, onSelectCategory, onHome, isHome }) {
+export default function Sidebar({ categories, activeCategory, isHome }) {
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef(null);
 
@@ -37,7 +41,6 @@ export default function Sidebar({ categories, activeCategory, onSelectCategory, 
   const totalTools = categories.reduce((acc, cat) => acc + cat.tools.length, 0);
 
   return (
-    // THE FIX: Detached from edges, calc height, margins, rounded-3xl, and full borders
     <aside className="w-[290px] flex flex-col h-[calc(100vh-40px)] my-5 ml-5 rounded-3xl border border-white/10 bg-[#0a0a0a]/40 backdrop-blur-3xl z-20 shrink-0 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
       
       {/* ── HEADER ──────────────────────────────────────────────────────── */}
@@ -52,13 +55,14 @@ export default function Sidebar({ categories, activeCategory, onSelectCategory, 
         </motion.div>
       </div>
 
-      {/* ── DASHBOARD LINK ──────────────────────────────────────────────── */}
+      {/* ── DASHBOARD LINK (Now an SEO-friendly MotionLink) ─────────────── */}
       <div className="px-4 mt-2">
-        <motion.button
-          onClick={() => { onHome(); setSearchQuery(''); }}
+        <MotionLink
+          to="/"
+          onClick={() => setSearchQuery('')}
           whileHover={{ x: 4, backgroundColor: 'rgba(255,255,255,0.08)' }}
           whileTap={{ scale: 0.97 }}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 border ${
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 border block ${
             isHome 
               ? 'text-white bg-white/10 border-white/10 shadow-lg backdrop-blur-md' 
               : 'text-slate-400 hover:text-slate-200 border-transparent'
@@ -66,7 +70,7 @@ export default function Sidebar({ categories, activeCategory, onSelectCategory, 
         >
           <Home size={18} strokeWidth={isHome ? 2.5 : 2} className={isHome ? 'text-white' : ''} />
           <span className={`text-sm ${isHome ? 'font-semibold' : 'font-medium'}`}>Dashboard</span>
-        </motion.button>
+        </MotionLink>
       </div>
 
       {/* ── INTERACTIVE SEARCH BAR (FROSTED) ────────────────────────────── */}
@@ -106,17 +110,18 @@ export default function Sidebar({ categories, activeCategory, onSelectCategory, 
               const isActive = activeCategory?.id === cat.id && !isHome;
               
               return (
-                <motion.button
+                <MotionLink
+                  to={`/category/${cat.id}`}
                   layout
                   initial={{ opacity: 0, scale: 0.95, y: 10 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
                   transition={{ type: 'spring', stiffness: 400, damping: 25, layout: { duration: 0.3 } }}
                   key={cat.id}
-                  onClick={() => { onSelectCategory(cat); setSearchQuery(''); }}
+                  onClick={() => setSearchQuery('')}
                   whileHover={{ x: 4, backgroundColor: isActive ? '' : 'rgba(255,255,255,0.05)' }}
                   whileTap={{ scale: 0.97 }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl transition-all duration-300 border ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl transition-all duration-300 border block ${
                     isActive 
                       ? 'text-white bg-white/10 border-white/10 shadow-lg backdrop-blur-md' 
                       : 'text-slate-400 hover:text-slate-200 border-transparent'
@@ -146,7 +151,7 @@ export default function Sidebar({ categories, activeCategory, onSelectCategory, 
                   }`}>
                     {cat.tools.length}
                   </span>
-                </motion.button>
+                </MotionLink>
               );
             })}
           </AnimatePresence>

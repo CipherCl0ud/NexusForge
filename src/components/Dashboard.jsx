@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { iconMap } from '../lib/iconMap';
 
 const containerVariants = {
@@ -12,15 +13,18 @@ const itemVariants = {
   visible: { opacity: 1, y: 0,  transition: { duration: 0.4 } },
 };
 
-function CategoryCard({ cat, onSelect }) {
+// Create an animated Link component for Framer Motion
+const MotionLink = motion(Link);
+
+function CategoryCard({ cat }) {
   const Icon = iconMap[cat.iconName];
   return (
-    <motion.div
+    <MotionLink
+      to={`/category/${cat.id}`}
       variants={itemVariants}
       whileHover={{ y: -5, scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
-      onClick={() => onSelect(cat)}
-      className="relative liquid-glass rounded-2xl p-6 cursor-pointer group overflow-hidden"
+      className="relative liquid-glass rounded-2xl p-6 cursor-pointer group overflow-hidden block"
     >
       {/* Hover glow */}
       <div
@@ -57,11 +61,12 @@ function CategoryCard({ cat, onSelect }) {
           </span>
         )}
       </div>
-    </motion.div>
+    </MotionLink>
   );
 }
 
-export default function Dashboard({ categories, onSelectCategory }) {
+// onSelectCategory is removed because React Router handles the navigation now
+export default function Dashboard({ categories }) {
   const totalTools = categories.reduce((sum, c) => sum + c.tools.length, 0);
 
   return (
@@ -100,7 +105,7 @@ export default function Dashboard({ categories, onSelectCategory }) {
         className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-10"
       >
         {categories.map(cat => (
-          <CategoryCard key={cat.id} cat={cat} onSelect={onSelectCategory} />
+          <CategoryCard key={cat.id} cat={cat} />
         ))}
       </motion.div>
 
@@ -112,7 +117,7 @@ export default function Dashboard({ categories, onSelectCategory }) {
         className="grid grid-cols-3 gap-4"
       >
         {[
-          { label: 'Tools Available',       value: totalTools },
+          { label: 'Tools Available',      value: totalTools },
           { label: 'File Formats Supported', value: '25+'     },
           { label: 'Server Uploads',         value: '0'       },
         ].map(stat => (
