@@ -9,3 +9,9 @@ PyMuPDF
 pypdf
 requests
 gpxpy
+mammoth
+python-pptx
+openpyxl
+python-docx
+moviepy==1.0.3
+pillow>=12.1.0

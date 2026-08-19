@@ -20,10 +20,16 @@ import PdfWatermarker    from './pdf/PdfWatermarker';
 import DocProtection     from './pdf/DocProtection';
 import ESignature        from './pdf/ESignature';
 import PdfAnnotator      from './pdf/PdfAnnotator';
+import WordToPdf  from './pdf/WordToPdf';
+import PptToPdf   from './pdf/PptToPdf';
+import ExcelToPdf from './pdf/ExcelToPdf';
+import PdfToWord  from './pdf/PdfToWord';
 
 // ── VIDEO & AUDIO TOOLS ────────────────────────────────────────────────────
 import VideoGpxProcessor from './video/VideoGpxProcessor';
-
+import VideoFrameExtractor from './video/VideoFrameExtractor';   // ← add this line
+import VideoToGif        from './video/VideoToGif';
+import AudioExtractor    from './video/AudioExtractor';
 // ── DEV UTILITIES TOOLS ────────────────────────────────────────────────────
 import JsonStudio        from './dev/JsonStudio';
 import MarkdownToHtml    from './dev/MarkdownToHtml';
@@ -51,9 +57,16 @@ const TOOL_COMPONENTS = {
   'doc-protect':     DocProtection,
   'e-signature':     ESignature,
   'pdf-annotator':   PdfAnnotator,
+  'word-to-pdf':   WordToPdf,
+'ppt-to-pdf':    PptToPdf,
+'excel-to-pdf':  ExcelToPdf,
+'pdf-to-word':   PdfToWord,
   
   // Video & Audio
   'video-gpx':       VideoGpxProcessor,
+  'video-frames':    VideoFrameExtractor,
+  'video-gif':      VideoToGif,
+  'audio-extract':  AudioExtractor,
   
   // Dev Utilities
   'json-studio':     JsonStudio,
