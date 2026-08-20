@@ -57,7 +57,7 @@ import gpxpy
 import shutil
 from datetime import datetime, timedelta
 from fastapi import BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import numpy as np
 import requests
 import zipfile
@@ -83,6 +83,15 @@ MODEL_DIR  = "models"
 MODEL_NAME = "RealESRGAN_x4.onnx"
 MODEL_PATH = os.path.join(MODEL_DIR, MODEL_NAME)
 MODEL_URL  = "https://huggingface.co/notaneimu/onnx-image-models/resolve/main/RealESRGAN_x4plus.onnx"
+
+# ─── UPSCALE TILING CONFIGURATION ────────────────────────────────────────────
+# Tiling keeps GPU memory usage roughly constant regardless of input image
+# size — this is what prevents the 4GB VRAM GTX 1650 from OOM-ing on a
+# single-shot 4x forward pass. Raise UPSCALE_TILE_SIZE for fewer/larger tiles
+# (faster, more VRAM) or lower it if you still see OOM errors on this GPU.
+UPSCALE_TILE_SIZE = 192
+UPSCALE_TILE_PAD  = 8
+UPSCALE_SCALE     = 4
 
 upscale_session = None
 
@@ -129,6 +138,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── ERROR RESPONSE HELPER ────────────────────────────────────────────────────
+# Every endpoint used to `return {"error": str(e)}` on failure. FastAPI sends
+# a bare dict back as HTTP 200 by default, so the frontend had no reliable way
+# to tell success from failure without inspecting the body. This wraps every
+# error path in a real JSONResponse with a proper status code instead.
+def error_response(message: str, status_code: int = 500):
+    return JSONResponse(status_code=status_code, content={"error": message})
+
 # ─── ENDPOINTS ───────────────────────────────────────────────────────────────
 
 @app.post("/api/remove-bg")
@@ -138,7 +155,55 @@ async def remove_background(file: UploadFile = File(...)):
         result = remove(await file.read())
         return Response(content=result, media_type="image/png")
     except Exception as e:
-        return {"error": str(e)}
+        return error_response(str(e))
+
+
+def _run_upscale_tile(tile_bgr: np.ndarray) -> np.ndarray:
+    """Runs one BGR tile through the ONNX Real-ESRGAN session and returns the upscaled BGR tile."""
+    img_rgb = cv2.cvtColor(tile_bgr, cv2.COLOR_BGR2RGB)
+    img_normalized = img_rgb.astype(np.float32) / 255.0
+    img_transposed = np.transpose(img_normalized, (2, 0, 1))
+    input_tensor = np.expand_dims(img_transposed, axis=0)
+
+    input_name = upscale_session.get_inputs()[0].name
+    output_tensor = upscale_session.run(None, {input_name: input_tensor})[0]
+
+    output_image = np.squeeze(output_tensor, axis=0)
+    output_image = np.clip(output_image, 0.0, 1.0)
+    output_image = np.transpose(output_image, (1, 2, 0))
+    output_image = (output_image * 255.0).round().astype(np.uint8)
+    return cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR)
+
+
+def upscale_tiled(img_bgr: np.ndarray) -> np.ndarray:
+    """Splits the image into small overlapping tiles and upscales each one
+    separately, so peak VRAM use stays roughly constant no matter how large
+    the input image is. Padding avoids visible seams at tile boundaries."""
+    h, w = img_bgr.shape[:2]
+    out_h, out_w = h * UPSCALE_SCALE, w * UPSCALE_SCALE
+    output = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+
+    for y in range(0, h, UPSCALE_TILE_SIZE):
+        for x in range(0, w, UPSCALE_TILE_SIZE):
+            # Padded tile bounds (clamped to image edges)
+            y0, y1 = max(0, y - UPSCALE_TILE_PAD), min(h, y + UPSCALE_TILE_SIZE + UPSCALE_TILE_PAD)
+            x0, x1 = max(0, x - UPSCALE_TILE_PAD), min(w, x + UPSCALE_TILE_SIZE + UPSCALE_TILE_PAD)
+
+            tile = img_bgr[y0:y1, x0:x1]
+            upscaled_tile = _run_upscale_tile(tile)
+
+            # Crop the padding back off in the upscaled tile's coordinate space
+            off_y = (y - y0) * UPSCALE_SCALE
+            off_x = (x - x0) * UPSCALE_SCALE
+            unpadded_h = (min(h, y + UPSCALE_TILE_SIZE) - y) * UPSCALE_SCALE
+            unpadded_w = (min(w, x + UPSCALE_TILE_SIZE) - x) * UPSCALE_SCALE
+
+            cropped = upscaled_tile[off_y:off_y + unpadded_h, off_x:off_x + unpadded_w]
+
+            out_y0, out_x0 = y * UPSCALE_SCALE, x * UPSCALE_SCALE
+            output[out_y0:out_y0 + unpadded_h, out_x0:out_x0 + unpadded_w] = cropped
+
+    return output
 
 
 @app.post("/api/upscale")
@@ -147,31 +212,19 @@ async def upscale_image(file: UploadFile = File(...)):
         # 1. Load image via OpenCV
         nparr = np.frombuffer(await file.read(), np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return error_response("Could not decode image — file may be corrupt or an unsupported format.", 400)
 
-        # 2. Pre-process for Real-ESRGAN (BGR -> RGB -> Float32 -> CHW format)
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img_normalized = img_rgb.astype(np.float32) / 255.0
-        img_transposed = np.transpose(img_normalized, (2, 0, 1))
-        input_tensor = np.expand_dims(img_transposed, axis=0)  # Add batch dimension
+        # 2. Upscale tile-by-tile instead of in one shot (see upscale_tiled)
+        output_bgr = upscale_tiled(img)
 
-        # 3. Run ONNX Inference on the GTX 1650
-        input_name = upscale_session.get_inputs()[0].name
-        output_tensor = upscale_session.run(None, {input_name: input_tensor})[0]
-
-        # 4. Post-process (Remove Batch -> CHW -> HWC -> RGB -> BGR -> UInt8)
-        output_image = np.squeeze(output_tensor, axis=0)
-        output_image = np.clip(output_image, 0.0, 1.0)
-        output_image = np.transpose(output_image, (1, 2, 0))
-        output_image = (output_image * 255.0).round().astype(np.uint8)
-        output_bgr = cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR)
-
-        # 5. Encode to PNG and Return
+        # 3. Encode to PNG and return
         _, buf = cv2.imencode(".png", output_bgr)
         return Response(content=buf.tobytes(), media_type="image/png")
         
     except Exception as e:
         print(f"Upscale Error: {e}")
-        return {"error": str(e)}
+        return error_response(str(e))
 
 
 @app.post("/api/compress-pdf")
@@ -199,7 +252,7 @@ async def compress_pdf(file: UploadFile = File(...)):
         return Response(content=out, media_type="application/pdf")
     except Exception as e:
         print(f"Compression error: {e}")
-        return {"error": str(e)}
+        return error_response(str(e))
 
 
 @app.post("/api/protect-pdf")
@@ -219,13 +272,13 @@ async def protect_pdf(
             )
         elif action == "decrypt":
             if doc.needs_pass and not doc.authenticate(password):
-                return {"error": "Incorrect password"}
+                return error_response("Incorrect password", 400)
             out = doc.write(encryption=fitz.PDF_ENCRYPT_NONE)
         else:
-            return {"error": f"Unknown action: {action}"}
+            return error_response(f"Unknown action: {action}", 400)
         return Response(content=out, media_type="application/pdf")
     except Exception as e:
-        return {"error": str(e)}
+        return error_response(str(e))
 
 
 @app.post("/api/pdf-to-image")
@@ -239,7 +292,7 @@ async def pdf_to_image(file: UploadFile = File(...)):
                 zf.writestr(f"page_{i + 1}.png", pix.tobytes("png"))
         return Response(content=zip_buf.getvalue(), media_type="application/zip")
     except Exception as e:
-        return {"error": str(e)}
+        return error_response(str(e))
     
 EMU_PER_POINT = 12700  # EMU (pptx units) -> PDF points
  
@@ -297,7 +350,7 @@ async def word_to_pdf(files: List[UploadFile] = File(...)):
         return package_results(results, "application/pdf")
     except Exception as e:
         print(f"Word to PDF error: {e}")
-        return {"error": str(e)}
+        return error_response(str(e))
  
  
 # ─── PPT → PDF ────────────────────────────────────────────────────────────────
@@ -342,7 +395,7 @@ async def ppt_to_pdf(files: List[UploadFile] = File(...)):
         return package_results(results, "application/pdf")
     except Exception as e:
         print(f"PPT to PDF error: {e}")
-        return {"error": str(e)}
+        return error_response(str(e))
  
  
 # ─── EXCEL → PDF ──────────────────────────────────────────────────────────────
@@ -379,7 +432,7 @@ async def excel_to_pdf(files: List[UploadFile] = File(...)):
         return package_results(results, "application/pdf")
     except Exception as e:
         print(f"Excel to PDF error: {e}")
-        return {"error": str(e)}
+        return error_response(str(e))
  
  
 # ─── PDF → WORD ───────────────────────────────────────────────────────────────
@@ -409,8 +462,10 @@ async def pdf_to_word(files: List[UploadFile] = File(...)):
         )
     except Exception as e:
         print(f"PDF to Word error: {e}")
-        return {"error": str(e)}
-    # ─── VIDEO TO GIF & AUDIO EXTRACTOR ──────────────────────────────────────────
+        return error_response(str(e))
+
+
+# ─── VIDEO TO GIF & AUDIO EXTRACTOR ──────────────────────────────────────────
 
 @app.post("/api/video-to-gif")
 async def video_to_gif(
@@ -476,6 +531,9 @@ async def video_to_gif(
             media_type="image/gif",
             headers={"Content-Disposition": f'attachment; filename="{out_name}"'}
         )
+    except Exception as e:
+        print(f"Video to GIF error: {e}")
+        return error_response(str(e))
     finally:
         if os.path.exists(temp_in_path):
             os.remove(temp_in_path)
@@ -515,11 +573,16 @@ async def audio_extract(
             media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{out_name}"'}
         )
+    except Exception as e:
+        print(f"Audio extract error: {e}")
+        return error_response(str(e))
     finally:
         if os.path.exists(temp_in_path):
             os.remove(temp_in_path)
         if os.path.exists(temp_out_path):
             os.remove(temp_out_path)
+
+
 # ─── VIDEO & GPX PROCESSING CLASSES ──────────────────────────────────────────
 
 class Coordinate_Systems:
@@ -675,10 +738,9 @@ def time_to_seconds(time_str: str) -> int:
     if len(parts) == 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
     elif len(parts) == 2: return parts[0] * 60 + parts[1]
     return parts[0]
+
 # ─────────────────────────────────────────────────────────────────────────────
-# VIDEO TO IMAGES (no GPX) — paste into main.py, below the existing
-# Video2ImageProcessor class / video endpoints. Reuses time_to_seconds() and
-# cleanup_temp_files(), which already exist in main.py. No new pip installs.
+# VIDEO TO IMAGES (no GPX) — reuses time_to_seconds() and cleanup_temp_files()
 # ─────────────────────────────────────────────────────────────────────────────
 
 class VideoFrameExtractor:
@@ -745,7 +807,7 @@ async def extract_video_frames(
     interval: float = Form(1.0),
 ):
     if not video.filename.lower().endswith(".mp4"):
-        return {"error": "Only MP4 files are accepted."}
+        return error_response("Only MP4 files are accepted.", 400)
 
     session_id = datetime.now().strftime("%Y%m%d%H%M%S")
     temp_dir = os.path.join("temp_data", session_id)
@@ -771,7 +833,7 @@ async def extract_video_frames(
 
         if saved_count == 0:
             cleanup_temp_files([temp_dir])
-            return {"error": "No frames were extracted — check your time range and interval."}
+            return error_response("No frames were extracted — check your time range and interval.", 400)
 
         background_tasks.add_task(cleanup_temp_files, [temp_dir, zip_path])
 
@@ -782,7 +844,7 @@ async def extract_video_frames(
     except Exception as e:
         print(f"Frame extraction error: {e}")
         cleanup_temp_files([temp_dir])
-        return {"error": str(e)}
+        return error_response(str(e))
 
 @app.post("/api/video-to-gpx-frames")
 async def extract_video_gpx_frames(
@@ -795,9 +857,9 @@ async def extract_video_gpx_frames(
     gpx_correction: bool = Form(False)
 ):
     if not video.filename.lower().endswith(".mp4"):
-        return {"error": "Only MP4 files are accepted."}
+        return error_response("Only MP4 files are accepted.", 400)
     if not gpx.filename.lower().endswith(".gpx"):
-        return {"error": "Input GPX file is invalid."}
+        return error_response("Input GPX file is invalid.", 400)
 
     # Setup temp directories
     session_id = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -834,7 +896,7 @@ async def extract_video_gpx_frames(
         
     except Exception as e:
         cleanup_temp_files([temp_dir])
-        return {"error": str(e)}
+        return error_response(str(e))
 
 if __name__ == "__main__":
     import uvicorn

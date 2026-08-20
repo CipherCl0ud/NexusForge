@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
 
@@ -21,7 +21,6 @@ const springTransition = {
 // ── INNER APP CONTENT (Handles Route Logic & Views) ──
 function MainLayout() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { categoryId, toolId } = useParams();
 
   // Find active category and tool based on current URL params
@@ -35,12 +34,6 @@ function MainLayout() {
 
   const handleHome = () => {
     navigate('/');
-  };
-
-  const handleSelectTool = (tool) => {
-    if (activeCategory) {
-      navigate(`/category/${activeCategory.id}/${tool.id}`);
-    }
   };
 
   const handleBackToCategory = () => {
@@ -123,7 +116,7 @@ function MainLayout() {
                       description={tool.description}
                       icon={Icon}
                       accentColor={activeCategory.color}
-                      onClick={() => handleSelectTool(tool)}
+                      to={`/category/${activeCategory.id}/${tool.id}`}
                     />
                   );
                 })}
