@@ -1,188 +1,337 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Maximize2, Download, X, Settings } from 'lucide-react';
+import { Maximize2, Download, X, Settings2, Image as ImageIcon, Archive, Trash2, CheckCircle2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import JSZip from 'jszip';
+import UploadZone from '../../components/UploadZone';
 
 export default function BulkResizer() {
   const [images, setImages] = useState([]);
   
-  // New Dimensional States
-  const [width, setWidth] = useState('1920');
+  // Dimensional States
+  const [width, setWidth] = useState('1080');
   const [height, setHeight] = useState('');
   const [maintainRatio, setMaintainRatio] = useState(true);
   
-  const [isDragging, setIsDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  const handleFiles = (files) => {
+  const handleFilesSelected = (files) => {
+    if (!files || files.length === 0) return;
+    
     const valid = [...files].filter(f => f.type.startsWith('image/'));
+    
+    if (images.length + valid.length > 100) {
+      toast.error("Limit reached: You can resize up to 100 images per batch.");
+      valid.splice(100 - images.length); 
+    }
+
     const newImages = valid.map(f => ({
       id: Math.random().toString(36).substr(2, 9),
       file: f,
       url: URL.createObjectURL(f),
-      status: 'pending' // pending, done
+      status: 'pending', // pending, done
+      resultData: null
     }));
+    
     setImages(prev => [...prev, ...newImages]);
   };
 
   const processAll = async () => {
+    if (!width && !height) {
+      toast.error("Please specify at least a target width or height.");
+      return;
+    }
+
     setProcessing(true);
+    const toastId = toast.loading(`Resizing ${images.filter(i => i.status === 'pending').length} images...`);
+    
+    let successCount = 0;
+
+    // Use a slight timeout to allow UI to render the loading state
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     for (let i = 0; i < images.length; i++) {
       if (images[i].status === 'done') continue;
       
-      const img = new Image();
-      await new Promise(r => { img.onload = r; img.src = images[i].url; });
-      
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      
-      let newW = img.width;
-      let newH = img.height;
-      const targetW = width ? Number(width) : null;
-      const targetH = height ? Number(height) : null;
+      try {
+        const img = new Image();
+        await new Promise((resolve, reject) => { 
+          img.onload = resolve; 
+          img.onerror = reject;
+          img.src = images[i].url; 
+        });
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let newW = img.width;
+        let newH = img.height;
+        const targetW = width ? Number(width) : null;
+        const targetH = height ? Number(height) : null;
 
-      // Smart Resizing Logic
-      if (maintainRatio) {
-        if (targetW && targetH) {
-          // Fit within the box defined by W and H
-          const ratio = Math.min(targetW / img.width, targetH / img.height);
-          newW = Math.round(img.width * ratio);
-          newH = Math.round(img.height * ratio);
-        } else if (targetW) {
-          newW = targetW;
-          newH = Math.round((img.height / img.width) * targetW);
-        } else if (targetH) {
-          newH = targetH;
-          newW = Math.round((img.width / img.height) * targetH);
+        // Smart Resizing Logic
+        if (maintainRatio) {
+          if (targetW && targetH) {
+            const ratio = Math.min(targetW / img.width, targetH / img.height);
+            newW = Math.max(1, Math.round(img.width * ratio));
+            newH = Math.max(1, Math.round(img.height * ratio));
+          } else if (targetW) {
+            newW = targetW;
+            newH = Math.max(1, Math.round((img.height / img.width) * targetW));
+          } else if (targetH) {
+            newH = targetH;
+            newW = Math.max(1, Math.round((img.width / img.height) * targetH));
+          }
+        } else {
+          newW = targetW || img.width;
+          newH = targetH || img.height;
         }
-      } else {
-        // Force exact dimensions (Stretch/Squish)
-        newW = targetW || img.width;
-        newH = targetH || img.height;
+        
+        canvas.width = newW;
+        canvas.height = newH;
+        
+        // High quality image smoothing
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, newW, newH);
+        
+        const dataUrl = canvas.toDataURL(images[i].file.type, 0.9);
+        
+        setImages(prev => prev.map((imgObj, idx) => 
+          idx === i ? { ...imgObj, status: 'done', resultData: dataUrl } : imgObj
+        ));
+        successCount++;
+      } catch (error) {
+        console.error("Failed to resize image:", images[i].file.name);
       }
-      
-      canvas.width = newW;
-      canvas.height = newH;
-      ctx.drawImage(img, 0, 0, newW, newH);
-      
-      const dataUrl = canvas.toDataURL(images[i].file.type, 0.9);
-      
-      setImages(prev => prev.map((imgObj, idx) => 
-        idx === i ? { ...imgObj, status: 'done', resultData: dataUrl } : imgObj
-      ));
     }
+    
     setProcessing(false);
+    toast.success(`Successfully resized ${successCount} images!`, { id: toastId });
   };
 
-  const downloadAll = () => {
-    images.filter(img => img.status === 'done').forEach((img, i) => {
-      setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = img.resultData;
-        a.download = `resized-${img.file.name}`;
-        a.click();
-      }, i * 300); // Stagger downloads slightly so the browser doesn't block them
-    });
+  const downloadAll = async () => {
+    const completed = images.filter(img => img.status === 'done');
+    if (completed.length === 0) return;
+
+    if (completed.length === 1) {
+      // Single file download
+      const a = document.createElement('a');
+      a.href = completed[0].resultData;
+      a.download = `resized-${completed[0].file.name}`;
+      a.click();
+      toast.success("Image downloaded!");
+      return;
+    }
+
+    // Bulk ZIP download to prevent browser popup blocking
+    const toastId = toast.loading('Bundling ZIP archive...');
+    try {
+      const zip = new JSZip();
+      
+      completed.forEach((img) => {
+        // Convert base64 dataUrl back to a clean blob for the ZIP
+        const base64Data = img.resultData.split(',')[1];
+        zip.file(`resized-${img.file.name}`, base64Data, { base64: true });
+      });
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nexusforge-resized-images.zip`;
+      a.click();
+      
+      URL.revokeObjectURL(url);
+      toast.success('Archive downloaded!', { id: toastId });
+    } catch (error) {
+      toast.error('Failed to generate ZIP archive.', { id: toastId });
+    }
   };
+
+  const removeImage = (id) => {
+    setImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  const clearAll = () => {
+    setImages([]);
+    setWidth('1080');
+    setHeight('');
+  };
+
+  const pendingCount = images.filter(i => i.status === 'pending').length;
+  const doneCount = images.filter(i => i.status === 'done').length;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left Side: Upload & Queue */}
-        <div className="md:col-span-2 space-y-4">
-          <div
-            onDragEnter={() => setIsDragging(true)}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
-            className={`relative h-32 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all cursor-pointer ${isDragging ? 'border-accent bg-accent/10' : 'border-white/10 bg-white/5 hover:bg-white/[0.07]'}`}
-          >
-            <div className="flex items-center gap-3 text-slate-300 pointer-events-none">
-              <Upload size={20} className="text-accent" />
-              <span className="font-medium">Drop multiple images here</span>
-            </div>
-            <input type="file" accept="image/*" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFiles(e.target.files)} />
-          </div>
+    // ── RESPONSIVE IDE LAYOUT (8/4 SPLIT) ──
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-260px)] min-h-[600px] max-h-[850px]">
+      
+      {/* ── LEFT PANE: Upload & Queue (8 Columns) ── */}
+      <div className="lg:col-span-8 flex flex-col gap-4 h-full min-h-0">
+        
+        {/* Compact Dropzone */}
+        <div className="shrink-0">
+          <UploadZone 
+            onFilesSelected={handleFilesSelected}
+            accept="image/png, image/jpeg, image/webp"
+            multiple={true}
+            maxFiles={100}
+            title="Add Images to Resize"
+            subtitle="Drag & drop up to 100 images"
+          />
+        </div>
 
-          <div className="glass-panel p-4 rounded-2xl min-h-[200px] max-h-[400px] overflow-y-auto">
+        {/* Scrollable Image Queue */}
+        <div className="flex-1 glass-panel rounded-2xl overflow-hidden flex flex-col bg-black/20">
+          <div className="px-4 py-3 border-b border-white/5 bg-white/5 text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex justify-between items-center">
+            <span>Image Queue ({images.length})</span>
+            {images.length > 0 && !processing && (
+              <button 
+                onClick={clearAll}
+                className="flex items-center gap-1.5 hover:text-red-400 transition-colors"
+              >
+                <Trash2 size={14} /> Clear All
+              </button>
+            )}
+          </div>
+          
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
             {images.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm gap-2 mt-12">
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm font-medium gap-3">
+                <ImageIcon size={32} className="opacity-20" />
                 No images queued.
               </div>
             ) : (
-              <div className="space-y-2">
-                {images.map((img) => (
-                  <div key={img.id} className="flex items-center justify-between p-2 bg-white/5 rounded-xl border border-white/5">
-                    <div className="flex items-center gap-3 truncate">
-                      <img src={img.url} alt="" className="w-10 h-10 object-cover rounded-lg bg-black/50" />
-                      <span className="text-sm text-slate-300 truncate w-48">{img.file.name}</span>
-                    </div>
-                    {img.status === 'done' ? (
-                      <span className="text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-md border border-emerald-400/20">Resized</span>
-                    ) : (
-                      <button onClick={() => setImages(prev => prev.filter(i => i.id !== img.id))} className="text-slate-500 hover:text-red-400 transition-colors p-1"><X size={16} /></button>
-                    )}
-                  </div>
-                ))}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                <AnimatePresence>
+                  {images.map((img) => (
+                    <motion.div 
+                      key={img.id} 
+                      initial={{ opacity: 0, scale: 0.9 }} 
+                      animate={{ opacity: 1, scale: 1 }} 
+                      exit={{ opacity: 0, scale: 0.9 }} 
+                      className="relative group rounded-xl overflow-hidden border border-white/10 bg-black/40 aspect-square flex flex-col items-center justify-center shadow-inner"
+                    >
+                      {/* Delete Button */}
+                      {img.status !== 'done' && !processing && (
+                        <button 
+                          onClick={() => removeImage(img.id)} 
+                          className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-red-500 text-slate-300 hover:text-white rounded-lg backdrop-blur-sm transition-all z-20 opacity-0 group-hover:opacity-100"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+
+                      <img 
+                        src={img.resultData || img.url} 
+                        alt={img.file.name} 
+                        className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 ${img.status === 'done' ? 'opacity-40 grayscale' : 'opacity-80'}`} 
+                      />
+
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+
+                      <div className="absolute bottom-0 left-0 w-full p-2 z-10 flex flex-col">
+                        <span className="text-[10px] font-bold text-white truncate drop-shadow-md">{img.file.name}</span>
+                        {img.status === 'done' ? (
+                          <span className="text-[10px] text-[#10B981] font-mono flex items-center gap-1 mt-0.5">
+                            <CheckCircle2 size={10} /> Resized
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-mono mt-0.5">Pending</span>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               </div>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Right Side: Settings */}
-        <div className="glass-panel p-6 rounded-2xl space-y-6 h-fit">
-          <div className="flex items-center gap-2 border-b border-white/5 pb-4">
-            <Settings size={18} className="text-accent" />
-            <h3 className="font-medium text-white">Resize Settings</h3>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Width (px)</label>
-                <input 
-                  type="number" value={width} onChange={(e) => setWidth(e.target.value)}
-                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-accent/50 font-mono text-sm placeholder:text-slate-600"
-                  placeholder="Auto"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-slate-400 block mb-2">Height (px)</label>
-                <input 
-                  type="number" value={height} onChange={(e) => setHeight(e.target.value)}
-                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-accent/50 font-mono text-sm placeholder:text-slate-600"
-                  placeholder="Auto"
-                />
-              </div>
-            </div>
-
-            <label className="flex items-center gap-3 cursor-pointer group p-2 rounded-lg hover:bg-white/5 transition-colors -mx-2">
+      {/* ── RIGHT PANE: Resize Settings (4 Columns) ── */}
+      <div className="lg:col-span-4 glass-panel p-6 rounded-2xl flex flex-col h-full min-h-0">
+        
+        <div className="flex items-center gap-2 border-b border-white/5 pb-4 shrink-0">
+          <Settings2 size={18} className="text-[#3b82f6]" />
+          <h3 className="font-bold text-white">Dimensions & Settings</h3>
+        </div>
+        
+        <div className="space-y-6 mt-6 shrink-0">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Width (px)</label>
               <input 
-                type="checkbox" 
-                checked={maintainRatio} 
-                onChange={(e) => setMaintainRatio(e.target.checked)}
-                className="w-4 h-4 rounded border-white/20 bg-black/20 text-accent focus:ring-accent/50 focus:ring-offset-0 cursor-pointer"
+                type="number" 
+                value={width} 
+                onChange={(e) => setWidth(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/50 font-mono text-sm placeholder:text-slate-600 transition-all"
+                placeholder="Auto"
               />
-              <span className="text-sm text-slate-300 group-hover:text-white transition-colors">Maintain aspect ratio</span>
-            </label>
-            
-            <p className="text-[10px] text-slate-500 leading-relaxed border-t border-white/5 pt-3">
-              {maintainRatio 
-                ? "Images scale safely. If both W and H are set, images fit entirely inside the box." 
-                : "Images will be forced to the exact dimensions specified, which may cause stretching."}
-            </p>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-2">Height (px)</label>
+              <input 
+                type="number" 
+                value={height} 
+                onChange={(e) => setHeight(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/50 font-mono text-sm placeholder:text-slate-600 transition-all"
+                placeholder="Auto"
+              />
+            </div>
           </div>
 
-          <div className="space-y-3 pt-2">
-            <button onClick={processAll} disabled={processing || images.length === 0} className="w-full py-3 bg-accent hover:bg-blue-600 disabled:opacity-50 text-white font-semibold rounded-xl transition-all shadow-lg shadow-accent/20 flex items-center justify-center gap-2">
-              <Maximize2 size={16} /> {processing ? 'Processing...' : 'Resize All Images'}
-            </button>
-            
-            <button onClick={downloadAll} disabled={!images.some(i => i.status === 'done')} className="w-full py-3 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 disabled:opacity-50 text-emerald-400 font-semibold rounded-xl transition-all flex items-center justify-center gap-2">
-              <Download size={16} /> Download Finished
-            </button>
+          <label className="flex items-center gap-3 cursor-pointer group p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/10 transition-all">
+            <input 
+              type="checkbox" 
+              checked={maintainRatio} 
+              onChange={(e) => setMaintainRatio(e.target.checked)}
+              className="w-4 h-4 rounded border-white/20 bg-black/40 text-[#3b82f6] focus:ring-[#3b82f6]/50 focus:ring-offset-0 cursor-pointer"
+            />
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">Maintain aspect ratio</span>
+              <span className="text-[10px] text-slate-500 leading-tight mt-0.5">
+                {maintainRatio ? "Prevents stretching. Fits inside dimensions." : "Forces exact dimensions. May stretch image."}
+              </span>
+            </div>
+          </label>
+        </div>
+
+        <div className="p-4 bg-black/20 rounded-xl border border-white/5 text-sm my-6 shrink-0 space-y-3">
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400 font-medium">Pending</span>
+            <span className="text-slate-300 font-mono bg-white/5 px-2 py-0.5 rounded">{pendingCount}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400 font-medium">Resized</span>
+            <span className="text-[#10B981] font-mono bg-[#10B981]/10 px-2 py-0.5 rounded">{doneCount}</span>
           </div>
         </div>
+
+        <div className="mt-auto space-y-3 shrink-0">
+          <button 
+            onClick={processAll} 
+            disabled={processing || pendingCount === 0} 
+            className="w-full py-4 bg-[#3b82f6] hover:bg-blue-500 disabled:bg-white/5 disabled:text-slate-500 text-white font-bold rounded-2xl transition-all shadow-lg shadow-[#3b82f6]/20 disabled:shadow-none flex items-center justify-center gap-2"
+          >
+            {processing ? (
+              <span className="animate-pulse flex items-center gap-2">Processing...</span>
+            ) : (
+              <><Maximize2 size={18} /> Resize Images</>
+            )}
+          </button>
+          
+          <button 
+            onClick={downloadAll} 
+            disabled={processing || doneCount === 0} 
+            className="w-full py-4 bg-[#10B981]/15 hover:bg-[#10B981]/25 border border-[#10B981]/30 disabled:opacity-50 disabled:bg-white/5 disabled:border-transparent disabled:text-slate-500 text-[#10B981] font-bold rounded-2xl transition-all flex items-center justify-center gap-2"
+          >
+            {doneCount > 1 ? <><Archive size={18} /> Download ZIP Archive</> : <><Download size={18} /> Download Image</>}
+          </button>
+        </div>
       </div>
+      
     </div>
   );
 }

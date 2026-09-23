@@ -72,7 +72,7 @@ import mammoth
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 import openpyxl
-from docx import Document as DocxDocument
+from pdf2docx import Converter
 from typing import List
 import tempfile
 from PIL import Image
@@ -435,28 +435,35 @@ async def excel_to_pdf(files: List[UploadFile] = File(...)):
         return error_response(str(e))
  
  
-# ─── PDF → WORD ───────────────────────────────────────────────────────────────
+# ─── PDF → WORD (UPGRADED LAYOUT ENGINE) ──────────────────────────────────────
 @app.post("/api/pdf-to-word")
 async def pdf_to_word(files: List[UploadFile] = File(...)):
-    """Text-only extraction — layout, images, and tables are not preserved."""
+    """High-accuracy extraction — preserves layouts, tables, and images."""
     try:
         results = []
         for f in files:
-            raw = await f.read()
-            pdf = fitz.open(stream=raw, filetype="pdf")
-            document = DocxDocument()
-            for i, page in enumerate(pdf):
-                if i > 0:
-                    document.add_page_break()
-                text = page.get_text("text")
-                for para in text.split("\n"):
-                    if para.strip():
-                        document.add_paragraph(para)
- 
-            out_buf = io.BytesIO()
-            document.save(out_buf)
-            results.append((os.path.splitext(f.filename)[0] + ".docx", out_buf.getvalue()))
- 
+            # pdf2docx requires physical file paths for geometry calculation
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                tmp_pdf.write(await f.read())
+                pdf_path = tmp_pdf.name
+            
+            docx_path = pdf_path + ".docx"
+            
+            try:
+                # Convert PDF to DOCX preserving layout, tables, and images
+                cv = Converter(pdf_path)
+                cv.convert(docx_path, start=0, end=None)
+                cv.close()
+                
+                with open(docx_path, "rb") as docx_file:
+                    docx_bytes = docx_file.read()
+                    
+                results.append((os.path.splitext(f.filename)[0] + ".docx", docx_bytes))
+            finally:
+                # Secure local cleanup
+                if os.path.exists(pdf_path): os.remove(pdf_path)
+                if os.path.exists(docx_path): os.remove(docx_path)
+
         return package_results(
             results, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
@@ -579,8 +586,6 @@ async def audio_extract(
     finally:
         if os.path.exists(temp_in_path):
             os.remove(temp_in_path)
-        if os.path.exists(temp_out_path):
-            os.remove(temp_out_path)
 
 
 # ─── VIDEO & GPX PROCESSING CLASSES ──────────────────────────────────────────

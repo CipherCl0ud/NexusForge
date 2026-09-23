@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Minimize2, X, Download, FileText, Loader2, FileUp, ShieldCheck } from 'lucide-react';
+import { Minimize2, X, Download, FileText, Loader2, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import UploadZone from '../../components/UploadZone';
 
 export default function PdfCompressor() {
   const [sourcePdf, setSourcePdf] = useState(null);
@@ -11,6 +13,13 @@ export default function PdfCompressor() {
   const [compressedSize, setCompressedSize] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Clean up URL on unmount
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   const formatBytes = (bytes) => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -19,9 +28,14 @@ export default function PdfCompressor() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const handleFile = (e) => {
-    const file = e.target.files?.[0];
-    if (!file || file.type !== 'application/pdf') return;
+  const handleFilesSelected = (files) => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    
+    if (file.type !== 'application/pdf') {
+      toast.error("Please upload a valid PDF document.");
+      return;
+    }
     
     setSourcePdf(file);
     setSourceName(file.name);
@@ -30,9 +44,17 @@ export default function PdfCompressor() {
     setCompressedSize(0);
   };
 
+  const clearWorkspace = () => {
+    setSourcePdf(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setCompressedSize(0);
+  };
+
   const compressPdf = async () => {
     if (!sourcePdf) return;
     setIsProcessing(true);
+    const toastId = toast.loading('Deflating structure & optimizing streams...');
 
     try {
       const formData = new FormData();
@@ -50,11 +72,15 @@ export default function PdfCompressor() {
       
       // Only update preview if it actually compressed, otherwise keep original
       if (pdfBlob.size < sourceSize) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
         setPreviewUrl(URL.createObjectURL(pdfBlob));
+        toast.success(`Successfully reduced file size by ${Math.round((1 - (pdfBlob.size / sourceSize)) * 100)}%!`, { id: toastId });
+      } else {
+        toast.success('Document is already highly optimized!', { id: toastId });
       }
     } catch (error) {
       console.error("Compression failed:", error);
-      alert("Failed to compress document. Check Python server connection.");
+      toast.error("Failed to compress document. Check Python server connection.", { id: toastId });
     } finally {
       setIsProcessing(false);
     }
@@ -66,6 +92,7 @@ export default function PdfCompressor() {
     a.href = previewUrl;
     a.download = `Compressed_${sourceName}`;
     a.click();
+    toast.success("Document downloaded!");
   };
 
   // Logic to handle already-tiny files
@@ -76,102 +103,152 @@ export default function PdfCompressor() {
     : 0;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[700px]">
-      {/* LEFT PANE */}
-      <div className="lg:col-span-5 flex flex-col gap-4 h-full">
+    // ── RESPONSIVE IDE LAYOUT (4/8 SPLIT) ──
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-260px)] min-h-[600px] max-h-[850px]">
+      
+      {/* ── LEFT PANE: Controls (4 Columns) ── */}
+      <div className="lg:col-span-4 flex flex-col gap-4 h-full min-h-0">
+        
         {!sourcePdf ? (
-          <div className="relative rounded-2xl border border-dashed border-white/20 bg-white/5 hover:bg-white/10 transition-colors flex flex-col items-center justify-center p-10 cursor-pointer shrink-0 h-full">
-            <FileUp size={32} className="text-amber-500 mb-3" />
-            <h3 className="text-lg font-medium text-white mb-1">Upload PDF to Compress</h3>
-            <p className="text-xs text-slate-500 text-center">Shrink file size locally via Python Engine</p>
-            <input type="file" accept="application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFile} />
+          <div className="flex-1 flex flex-col h-full">
+            <UploadZone 
+              onFilesSelected={handleFilesSelected}
+              accept=".pdf, application/pdf"
+              multiple={false}
+              title="Compress PDF"
+              subtitle="Drop a PDF to shrink file size locally"
+            />
           </div>
         ) : (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-4 h-full">
-            <div className="glass-panel p-4 rounded-2xl flex flex-col gap-3 border border-amber-500/20 bg-amber-500/5 relative overflow-hidden shrink-0">
-              <div className="flex items-center justify-between z-10">
-                <div className="flex items-center gap-3">
-                  <FileText size={20} className="text-amber-500 shrink-0" />
-                  <p className="text-sm font-medium text-white truncate max-w-[200px]">{sourceName}</p>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-5 rounded-2xl flex flex-col h-full overflow-hidden">
+            
+            <div className="border-b border-white/5 pb-4 mb-6 shrink-0 flex justify-between items-center">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Minimize2 size={18} className="text-amber-500" /> Compression Engine
+              </h3>
+              <button 
+                onClick={clearWorkspace} 
+                className="p-1.5 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                title="Clear Workspace"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* File Info Card */}
+            <div className="bg-black/30 border border-white/5 rounded-xl p-4 flex flex-col gap-3 mb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 shrink-0">
+                  <FileText size={20} />
                 </div>
-                <button onClick={() => { setSourcePdf(null); setPreviewUrl(null); }} className="p-1.5 text-slate-500 hover:text-white rounded-lg transition-colors"><X size={16}/></button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white truncate">{sourceName}</p>
+                </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4 mt-2 z-10">
-                <div className="bg-black/30 rounded-xl p-3 border border-white/5">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Original Size</p>
-                  <p className="text-lg font-mono text-white">{formatBytes(sourceSize)}</p>
+              <div className="grid grid-cols-2 gap-3 mt-1">
+                <div className="bg-white/5 rounded-lg p-2 border border-white/5 text-center">
+                  <p className="text-[9px] text-slate-500 uppercase tracking-widest mb-0.5 font-bold">Original</p>
+                  <p className="text-sm font-mono text-white">{formatBytes(sourceSize)}</p>
                 </div>
-                <div className={`rounded-xl p-3 border ${compressedSize ? (isOptimized ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-amber-500/10 border-amber-500/20') : 'bg-white/5 border-white/5'}`}>
-                  <p className={`text-[10px] uppercase tracking-widest mb-1 ${compressedSize ? (isOptimized ? 'text-emerald-500/70' : 'text-amber-500/70') : 'text-slate-600'}`}>
-                    New Size
+                <div className={`rounded-lg p-2 border text-center transition-colors ${compressedSize ? (isOptimized ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-amber-500/10 border-amber-500/20') : 'bg-white/5 border-white/5'}`}>
+                  <p className={`text-[9px] uppercase tracking-widest mb-0.5 font-bold ${compressedSize ? (isOptimized ? 'text-emerald-500/70' : 'text-amber-500/70') : 'text-slate-600'}`}>
+                    Compressed
                   </p>
-                  <p className={`text-lg font-mono ${compressedSize ? (isOptimized ? 'text-emerald-400' : 'text-amber-400') : 'text-slate-500'}`}>
+                  <p className={`text-sm font-mono ${compressedSize ? (isOptimized ? 'text-emerald-400' : 'text-amber-400') : 'text-slate-500'}`}>
                     {compressedSize ? formatBytes(displaySize) : '---'}
                   </p>
                 </div>
               </div>
-
-              {compressedSize > 0 && !isOptimized && (
-                <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-amber-500/10 rounded-full blur-xl z-0" />
-              )}
             </div>
 
-            <div className="glass-panel p-5 rounded-2xl flex-1 flex flex-col justify-center items-center text-center">
-              {compressedSize > 0 ? (
-                isOptimized ? (
-                  <>
-                    <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mb-4 text-emerald-400 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                      <ShieldCheck size={28} />
-                    </div>
-                    <h4 className="text-white font-medium mb-1">Already Highly Optimized</h4>
-                    <p className="text-sm text-slate-400 px-4">This file is incredibly small. Further compression would only increase its size.</p>
-                  </>
+            <div className="flex-1 bg-black/20 rounded-xl border border-white/5 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden shrink-0">
+              {compressedSize > 0 && !isOptimized && (
+                <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl z-0 pointer-events-none" />
+              )}
+              
+              <div className="z-10 flex flex-col items-center">
+                {compressedSize > 0 ? (
+                  isOptimized ? (
+                    <>
+                      <div className="w-16 h-16 rounded-full bg-[#10B981]/10 flex items-center justify-center mb-4 text-[#10B981] border border-[#10B981]/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
+                        <ShieldCheck size={28} />
+                      </div>
+                      <h4 className="text-white font-bold mb-2">Already Optimized</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed px-2">This file is incredibly small. Further compression would only damage quality without saving space.</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-4 text-amber-500 border border-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
+                        <span className="text-xl font-black">-{savedPercent}%</span>
+                      </div>
+                      <h4 className="text-white font-bold mb-2">Compression Complete</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed px-2">Review the quality in the right pane before downloading your optimized file.</p>
+                    </>
+                  )
                 ) : (
                   <>
-                    <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center mb-4 text-amber-400 border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                      <span className="text-xl font-black">-{savedPercent}%</span>
-                    </div>
-                    <h4 className="text-white font-medium mb-1">Compression Complete</h4>
-                    <p className="text-sm text-slate-400">Review the quality in the right pane before downloading.</p>
+                    <Minimize2 size={36} className="text-slate-600 mb-4 opacity-50" />
+                    <h4 className="text-white font-bold mb-2">Ready to Compress</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed px-2">The local engine will strip unused metadata, garbage-collect dead streams, and deflate the structure.</p>
                   </>
-                )
-              ) : (
-                <>
-                  <Minimize2 size={32} className="text-slate-600 mb-4" />
-                  <h4 className="text-white font-medium mb-1">Ready to compress</h4>
-                  <p className="text-sm text-slate-400 px-4">This will strip unused metadata, garbage collect dead streams, and deflate the structure.</p>
-                </>
-              )}
+                )}
+              </div>
             </div>
 
-            {!compressedSize ? (
-              <button onClick={compressPdf} disabled={isProcessing} className="w-full py-3.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-semibold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg">
-                {isProcessing ? <><Loader2 size={18} className="animate-spin" /> Engine Processing...</> : <><Minimize2 size={18} /> Compress File</>}
-              </button>
-            ) : (
-              <button onClick={downloadPdf} className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg">
-                <Download size={18} /> {isOptimized ? 'Keep Original File' : 'Save Compressed PDF'}
-              </button>
-            )}
+            <div className="mt-auto pt-4 shrink-0 border-t border-white/5">
+              {!compressedSize ? (
+                <button 
+                  onClick={compressPdf} 
+                  disabled={isProcessing} 
+                  className="w-full py-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:bg-white/5 disabled:text-slate-500 text-white font-bold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 disabled:shadow-none"
+                >
+                  {isProcessing ? (
+                    <><Loader2 size={18} className="animate-spin" /> Compressing...</>
+                  ) : (
+                    <><Minimize2 size={18} /> Compress File</>
+                  )}
+                </button>
+              ) : (
+                <button 
+                  onClick={downloadPdf} 
+                  className="w-full py-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#10B981]/20"
+                >
+                  <Download size={18} /> {isOptimized ? 'Keep Original File' : 'Save Compressed PDF'}
+                </button>
+              )}
+            </div>
           </motion.div>
         )}
       </div>
 
-      {/* RIGHT PANE: Live Preview */}
-      <div className="lg:col-span-7 glass-panel rounded-2xl overflow-hidden relative border border-white/10 flex flex-col">
-        <div className="bg-black/40 px-4 py-3 border-b border-white/5 flex justify-between items-center shrink-0">
-          <span className="text-sm font-medium flex items-center gap-2"><Minimize2 size={16} className="text-amber-500"/> Quality Inspection</span>
+      {/* ── RIGHT PANE: Live Quality Inspection (8 Columns) ── */}
+      <div className="lg:col-span-8 glass-panel rounded-2xl overflow-hidden relative border border-white/10 flex flex-col h-full min-h-0 bg-black/20">
+        
+        <div className="bg-white/5 px-5 py-4 border-b border-white/5 flex justify-between items-center shrink-0">
+          <span className="text-sm font-bold flex items-center gap-2 text-white">
+            <Minimize2 size={16} className="text-amber-500"/> Quality Inspection
+          </span>
+          {compressedSize > 0 && (
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-black/40 px-2 py-1 rounded-md">
+              <CheckCircle2 size={12} className={isOptimized ? "text-[#10B981]" : "text-amber-500"} /> 
+              {isOptimized ? 'Original' : 'Compressed Preview'}
+            </div>
+          )}
         </div>
         
-        <div className="flex-1 bg-[#1e1e1e] relative">
+        <div className="flex-1 bg-[#0a0a0a] relative min-h-0 p-4 flex items-center justify-center">
           {!previewUrl ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
-              <Minimize2 size={24} className="opacity-50" />
-              Compressed document will appear here
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 text-sm font-medium gap-3">
+              <Minimize2 size={32} className="opacity-20" />
+              Waiting for document...
             </div>
           ) : (
-            <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`} className="w-full h-full border-none" title="Compressed PDF Preview" />
+            <iframe 
+              src={previewUrl} 
+              className="w-full h-full border-none rounded-xl bg-white shadow-2xl" 
+              title="Compressed PDF Preview" 
+            />
           )}
         </div>
       </div>

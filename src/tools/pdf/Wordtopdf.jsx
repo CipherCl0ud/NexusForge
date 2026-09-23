@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Download, Loader2, AlertCircle, X, FileCheck2, UploadCloud, CheckCircle2, RotateCcw, ShieldCheck } from 'lucide-react';
+import { FileText, Download, Loader2, X, CheckCircle2, ShieldCheck, RefreshCw, Trash2, FileOutput, Archive } from 'lucide-react';
+import toast from 'react-hot-toast';
+import UploadZone from '../../components/UploadZone';
 
-const ACCEPT = '.docx';
 const ENDPOINT = 'http://localhost:8000/api/word-to-pdf';
 
 const formatBytes = (bytes) => {
@@ -14,45 +15,74 @@ const formatBytes = (bytes) => {
 export default function WordToPdf() {
   const [files, setFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null); // { blob, filename, isZip, size }
+  const [result, setResult] = useState(null); // { blob, filename, isZip, size, url }
 
-  const addFiles = (fileList) => {
-    const valid = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.docx'));
+  // Cleanup URLs on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (result) URL.revokeObjectURL(result.url);
+    };
+  }, [result]);
+
+  const handleFilesSelected = (selectedFiles) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    
+    const valid = Array.from(selectedFiles).filter(f => 
+      f.name.toLowerCase().endsWith('.docx') || 
+      f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    );
+    
     if (valid.length === 0) {
-      setError('Please select valid .docx Word files.');
+      toast.error('Please select valid .docx Word files.');
       return;
     }
-    setFiles(prev => [...prev, ...valid]);
-    setError(null);
+
+    const newFiles = valid.map(f => ({
+      id: Math.random().toString(36).substr(2, 9),
+      file: f,
+      name: f.name,
+      size: f.size
+    }));
+
+    setFiles(prev => [...prev, ...newFiles]);
   };
 
-  const handleDrop = (e) => { e.preventDefault(); addFiles(e.dataTransfer.files); };
-  const handleSelect = (e) => { addFiles(e.target.files); e.target.value = ''; };
-  const removeFile = (idx) => setFiles(prev => prev.filter((_, i) => i !== idx));
+  const removeFile = (id) => {
+    setFiles(prev => prev.filter(f => f.id !== id));
+  };
+
+  const clearWorkspace = () => {
+    setFiles([]);
+    if (result) URL.revokeObjectURL(result.url);
+    setResult(null);
+  };
 
   const convert = async () => {
-    if (files.length === 0) { setError('Please add at least one Word file.'); return; }
+    if (files.length === 0) return;
+    
     setProcessing(true);
-    setError(null);
+    const toastId = toast.loading(`Converting ${files.length} document(s)...`);
 
     try {
       const formData = new FormData();
-      files.forEach(f => formData.append('files', f));
+      files.forEach(f => formData.append('files', f.file));
 
       const response = await fetch(ENDPOINT, { method: 'POST', body: formData });
       if (!response.ok) {
-        const errData = await response.json();
+        const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || 'Conversion failed');
       }
 
       const blob = await response.blob();
       const isZip = blob.type === 'application/zip';
       const filename = isZip ? 'converted_pdfs.zip' : `${files[0].name.replace(/\.[^/.]+$/, "")}.pdf`;
-      setResult({ blob, filename, isZip, size: blob.size });
+      const url = URL.createObjectURL(blob);
+      
+      setResult({ blob, filename, isZip, size: blob.size, url });
+      toast.success('Conversion complete!', { id: toastId });
     } catch (err) {
       console.error('Conversion failed:', err);
-      setError(err.message);
+      toast.error(err.message || 'Failed to convert document(s).', { id: toastId });
     } finally {
       setProcessing(false);
     }
@@ -60,106 +90,193 @@ export default function WordToPdf() {
 
   const downloadResult = () => {
     if (!result) return;
-    const url = window.URL.createObjectURL(result.blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = result.url;
     a.download = result.filename;
-    document.body.appendChild(a);
     a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    toast.success("File downloaded!");
   };
 
-  const reset = () => { setFiles([]); setResult(null); setError(null); };
-
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-6 rounded-2xl space-y-6">
+    // ── RESPONSIVE IDE LAYOUT (4/8 SPLIT) ──
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-260px)] min-h-[600px] max-h-[850px]">
+      
+      {/* ── LEFT PANE: Document Queue ── */}
+      <div className="lg:col-span-4 flex flex-col gap-4 h-full min-h-0">
+        
+        <div className="shrink-0">
+          <UploadZone 
+            onFilesSelected={handleFilesSelected}
+            accept=".docx, application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            multiple={true}
+            title="Add Word Docs"
+            subtitle="Drag & drop .docx files"
+          />
+        </div>
 
-        <div className="border-b border-white/5 pb-4 flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-white font-medium flex items-center gap-2 text-lg">
-              <FileText size={20} className="text-accent" /> Word to PDF
-            </h3>
-            <p className="text-sm text-slate-400 mt-1">Convert one or more .docx Word files into professional PDF documents.</p>
+        <div className="flex-1 glass-panel rounded-2xl overflow-hidden flex flex-col bg-black/20">
+          <div className="px-4 py-3 border-b border-white/5 bg-white/5 text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex justify-between items-center">
+            <span>Document Queue ({files.length})</span>
+            {files.length > 0 && !processing && !result && (
+              <button onClick={clearWorkspace} className="flex items-center gap-1.5 hover:text-red-400 transition-colors">
+                <Trash2 size={14} /> Clear All
+              </button>
+            )}
           </div>
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-500 shrink-0 pt-1">
-            <ShieldCheck size={13} /> Local processing only
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+            {files.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm font-medium gap-3">
+                <FileText size={32} className="opacity-20" />
+                No documents queued.
+              </div>
+            ) : (
+              <AnimatePresence mode='popLayout'>
+                {files.map((f) => (
+                  <motion.div 
+                    layout key={f.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} 
+                    className="flex items-center gap-3 p-3 rounded-xl border bg-white/5 border-white/5 hover:bg-white/10 transition-colors group"
+                  >
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-inner bg-[#3b82f6]/20 text-[#3b82f6]">
+                      <FileText size={16} />
+                    </div>
+                    
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <span className="text-sm font-bold truncate transition-colors text-slate-200 group-hover:text-white">
+                        {f.name}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">{formatBytes(f.size)}</span>
+                    </div>
+
+                    {!processing && !result && (
+                      <button onClick={() => removeFile(f.id)} className="p-2 text-slate-500 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all shrink-0">
+                        <X size={16}/>
+                      </button>
+                    )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            )}
           </div>
         </div>
 
-        <AnimatePresence>
-          {error && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-start gap-3">
-              <AlertCircle size={20} className="shrink-0 mt-0.5" />
-              <p className="text-sm">{error}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {result ? (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-center py-6 space-y-5">
-            <div className="inline-flex p-4 rounded-full bg-emerald-500/15 text-emerald-400">
-              <CheckCircle2 size={36} />
-            </div>
-            <div>
-              <p className="text-white font-medium text-lg">Conversion complete</p>
-              <p className="text-sm text-slate-400 mt-1">{result.filename} · {formatBytes(result.size)}</p>
-            </div>
-            <div className="flex items-center justify-center gap-3">
-              <button onClick={downloadResult} className="px-6 py-3 bg-accent hover:bg-blue-600 text-white font-semibold rounded-xl flex items-center gap-2 shadow-lg shadow-accent/20 transition-colors">
-                <Download size={16} /> Download {result.isZip ? 'ZIP' : 'PDF'}
-              </button>
-              <button onClick={reset} className="px-5 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-medium rounded-xl flex items-center gap-2 transition-colors">
-                <RotateCcw size={14} /> Convert More
-              </button>
-            </div>
-          </motion.div>
-        ) : (
-          <>
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              className="relative rounded-2xl border-2 border-dashed border-white/10 bg-white/5 hover:bg-white/[0.07] flex flex-col items-center justify-center transition-all py-10 px-4"
+        <div className="shrink-0 pt-2">
+          {!result ? (
+            <button 
+              onClick={convert} disabled={processing || files.length === 0} 
+              className="w-full py-4 bg-[#3b82f6] hover:bg-blue-500 disabled:opacity-50 disabled:bg-white/5 disabled:text-slate-500 text-white font-bold rounded-2xl transition-all shadow-lg shadow-[#3b82f6]/20 disabled:shadow-none flex items-center justify-center gap-2"
             >
-              <div className="inline-flex p-3 rounded-full bg-white/5 border border-white/10 mb-3 text-slate-400">
-                <UploadCloud size={26} />
-              </div>
-              <label className="relative cursor-pointer px-5 py-2.5 bg-accent hover:bg-blue-600 text-white text-sm font-semibold rounded-lg transition-colors mb-2">
-                Choose Files
-                <input type="file" accept={ACCEPT} multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleSelect} />
-              </label>
-              <p className="text-xs text-slate-500">...or drop .docx files here</p>
-            </div>
+              {processing ? (
+                <><RefreshCw size={18} className="animate-spin" /> Converting Document{files.length > 1 ? 's' : ''}...</>
+              ) : (
+                <><FileOutput size={18} /> Convert to PDF</>
+              )}
+            </button>
+          ) : (
+            <button onClick={clearWorkspace} className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold rounded-2xl transition-all flex items-center justify-center gap-2">
+              <RefreshCw size={18} /> Convert New Files
+            </button>
+          )}
+        </div>
+      </div>
 
-            {files.length > 0 && (
-              <div className="space-y-2">
-                {files.map((f, idx) => (
-                  <div key={idx} className="flex items-center justify-between bg-black/20 border border-white/5 rounded-xl px-4 py-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FileCheck2 size={18} className="text-emerald-400 shrink-0" />
-                      <span className="text-sm text-white truncate">{f.name}</span>
-                      <span className="text-xs text-slate-500 shrink-0">{formatBytes(f.size)}</span>
-                    </div>
-                    <button onClick={() => removeFile(idx)} className="p-1.5 hover:bg-red-500/20 rounded-full text-slate-400 hover:text-red-400 transition-colors shrink-0">
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+      {/* ── RIGHT PANE: Preview / Success Dashboard ── */}
+      <div className="lg:col-span-8 glass-panel rounded-2xl overflow-hidden relative border border-white/10 flex flex-col h-full min-h-0 bg-black/20">
+        
+        <div className="bg-white/5 px-5 py-4 border-b border-white/5 flex justify-between items-center shrink-0">
+          <span className="text-sm font-bold flex items-center gap-2 text-white">
+            {result ? (
+              <><CheckCircle2 size={16} className="text-[#10B981]"/> Export Inspector</>
+            ) : (
+              <><FileOutput size={16} className="text-[#3b82f6]"/> Output Status</>
+            )}
+          </span>
+          <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-black/40 px-2 py-1 rounded-md">
+            <ShieldCheck size={12} className="text-[#3b82f6]" /> Local Engine
+          </div>
+        </div>
+        
+        <div className="flex-1 bg-[#0a0a0a] relative min-h-0">
+          <AnimatePresence mode="wait">
+            
+            {/* 1. Empty State */}
+            {files.length === 0 && !result && (
+              <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 text-sm font-medium gap-3">
+                <FileOutput size={32} className="opacity-20" />
+                Waiting for documents...
+              </motion.div>
             )}
 
-            <button
-              onClick={convert}
-              disabled={processing || files.length === 0}
-              className={`w-full py-4 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 ${files.length === 0 ? 'bg-white/5 text-slate-500 cursor-not-allowed' : 'bg-accent hover:bg-blue-600 text-white shadow-lg shadow-accent/20'}`}
-            >
-              {processing ? (<><Loader2 size={18} className="animate-spin" /> Converting...</>) : (<>Convert {files.length > 1 ? `${files.length} Files` : 'to PDF'}</>)}
-            </button>
-          </>
-        )}
+            {/* 2. Ready / Processing State */}
+            {files.length > 0 && !result && (
+              <motion.div key="ready" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 p-4 flex flex-col items-center justify-center text-center">
+                {processing ? (
+                  <>
+                    <Loader2 size={48} className="text-[#3b82f6] animate-spin mb-4 drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+                    <h3 className="text-xl font-bold text-white mb-2 animate-pulse">Rendering PDF Engine...</h3>
+                    <p className="text-sm text-slate-400">Rebuilding layouts, fonts, and images into a secure document.</p>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={48} className="text-slate-600 mb-4" />
+                    <h3 className="text-xl font-bold text-white mb-2">Ready to Render</h3>
+                    <p className="text-sm text-slate-400 max-w-sm">Press "Convert to PDF" to generate your high-fidelity documents locally.</p>
+                  </>
+                )}
+              </motion.div>
+            )}
 
-      </motion.div>
+            {/* 3. Success Dashboard & Live PDF Preview */}
+            {result && (
+              <motion.div key="success" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-[#10B981]/5 to-transparent relative">
+                
+                {/* If it's a single PDF, we can show a live preview! */}
+                {!result.isZip ? (
+                  <div className="absolute inset-0 p-4 flex items-center justify-center">
+                    <iframe src={`${result.url}#toolbar=0&navpanes=0&scrollbar=0`} className="w-full h-full border-none rounded-xl bg-white shadow-2xl" title="Generated PDF Preview" />
+                    
+                    {/* Floating Download Overlay */}
+                    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 flex gap-4">
+                      <button onClick={downloadResult} className="px-6 py-3 bg-[#10B981] hover:bg-[#059669] text-white font-bold rounded-full transition-all flex items-center justify-center gap-2 shadow-[0_10px_40px_rgba(16,185,129,0.4)] hover:scale-105">
+                        <Download size={18} /> Download Generated PDF
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // ZIP UI for multiple files
+                  <div className="flex flex-col items-center p-8 text-center">
+                    <div className="w-24 h-24 rounded-full bg-[#10B981]/10 flex items-center justify-center text-[#10B981] mb-6 shadow-[0_0_50px_rgba(16,185,129,0.2)] border border-[#10B981]/20">
+                      <Archive size={48} />
+                    </div>
+                    
+                    <h2 className="text-3xl font-black text-white mb-2 tracking-tight">Render Complete</h2>
+                    <p className="text-slate-400 max-w-md mb-8">
+                      Successfully generated {files.length} secure PDFs. They have been packed into a convenient ZIP archive.
+                    </p>
+
+                    <div className="bg-black/40 border border-white/5 rounded-2xl p-6 mb-8 min-w-[300px]">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-slate-500 text-sm font-medium">Output File</span>
+                        <span className="text-white font-mono text-sm">{result.filename}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 text-sm font-medium">Archive Size</span>
+                        <span className="text-white font-mono text-sm bg-white/5 px-2 py-0.5 rounded border border-white/10">{formatBytes(result.size)}</span>
+                      </div>
+                    </div>
+
+                    <button onClick={downloadResult} className="px-8 py-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#10B981]/20">
+                      <Download size={20} /> Download ZIP Archive
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+          </AnimatePresence>
+        </div>
+      </div>
+
     </div>
   );
 }

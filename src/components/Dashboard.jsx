@@ -20,7 +20,7 @@ function CategoryCard({ cat }) {
   const Icon = iconMap[cat.iconName];
   return (
     <MotionLink
-      to={`/category/${cat.id}`}
+      to={`/app/category/${cat.id}`} // <-- FIXED THIS LINK
       variants={itemVariants}
       whileHover={{ y: -5, scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
@@ -65,7 +65,6 @@ function CategoryCard({ cat }) {
   );
 }
 
-// onSelectCategory is removed because React Router handles the navigation now
 export default function Dashboard({ categories }) {
   const totalTools = categories.reduce((sum, c) => sum + c.tools.length, 0);
 
@@ -114,7 +113,7 @@ export default function Dashboard({ categories }) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="grid grid-cols-3 gap-4"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
       >
         {[
           { label: 'Tools Available',      value: totalTools },

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   MousePointer, Square, Pentagon, Paintbrush, Eraser, ZoomIn, ZoomOut, 
-  Trash2, Download, Upload, Eye, EyeOff, Plus, Undo2, Redo2, Image as ImgIcon,
-  Maximize, Minimize 
+  Trash2, Download, Eye, EyeOff, Plus, Undo2, Redo2, Image as ImgIcon,
+  Maximize, Minimize, Settings2
 } from 'lucide-react';
+import UploadZone from '../../components/UploadZone';
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
 let _id = 0;
@@ -463,168 +464,195 @@ export default function VisionAnnotator() {
   const brushCount=anns.filter(a=>a.type==='brush').length;
 
   return (
+    // ── THE FIX: Constrained IDE-style wrapper ──
     <div 
       ref={wrapperRef} 
-      className={`flex flex-col overflow-hidden bg-[#07070f] ${isFullscreen ? 'w-full h-full fixed inset-0 z-50 rounded-none border-none' : 'h-[700px] rounded-2xl border border-white/10'}`}
+      className={`flex flex-col overflow-hidden bg-[#0a0a0a] transition-all shadow-2xl ${
+        isFullscreen 
+          ? 'w-full h-full fixed inset-0 z-50 rounded-none border-none' 
+          : 'h-[calc(100vh-260px)] min-h-[600px] max-h-[900px] rounded-2xl border border-white/10'
+      }`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-black/40 border-b border-white/5 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-bold text-white tracking-tight">Vision Annotator</span>
-          {imgInfo && <span className="text-[11px] text-slate-500 font-mono">{imgInfo.name} · {imgInfo.w}×{imgInfo.h}px</span>}
-          <span className="text-[11px] text-slate-600 font-mono">{Math.round(zoom*100)}%</span>
+      {/* ── TOP HEADER ── */}
+      <div className="flex items-center justify-between px-4 py-3 bg-white/5 border-b border-white/5 flex-shrink-0 z-20 backdrop-blur-md">
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
+            <Settings2 size={16} className="text-[#3b82f6]" />
+            Vision Annotator
+          </span>
+          {imgInfo && (
+            <>
+              <div className="w-px h-4 bg-white/10" />
+              <span className="text-[11px] text-slate-400 font-mono bg-black/30 px-2 py-1 rounded-md border border-white/5">
+                {imgInfo.name} · {imgInfo.w}×{imgInfo.h}px
+              </span>
+            </>
+          )}
+          <span className="text-[11px] text-slate-500 font-mono">{Math.round(zoom*100)}%</span>
           {anns.length>0 && (
-            <div className="flex gap-1.5">
-              {bboxCount>0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/20 text-blue-400">{bboxCount} bbox</span>}
-              {polyCount>0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-pink-500/15 border border-pink-500/20 text-pink-400">{polyCount} poly</span>}
-              {brushCount>0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 text-emerald-400">{brushCount} mask</span>}
+            <div className="flex gap-1.5 ml-2">
+              {bboxCount>0 && <span className="text-[10px] px-2 py-0.5 rounded border border-blue-500/20 text-blue-400">{bboxCount} bbox</span>}
+              {polyCount>0 && <span className="text-[10px] px-2 py-0.5 rounded border border-pink-500/20 text-pink-400">{polyCount} poly</span>}
+              {brushCount>0 && <span className="text-[10px] px-2 py-0.5 rounded border border-emerald-500/20 text-emerald-400">{brushCount} mask</span>}
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
-          <button onClick={undo} title="Undo Ctrl+Z" className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-all"><Undo2 size={14}/></button>
-          <button onClick={redo} title="Redo Ctrl+Shift+Z" className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-all"><Redo2 size={14}/></button>
-          <div className="w-px h-4 bg-white/10 mx-1"/>
-          
-          <button onClick={toggleFullscreen} title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all mr-1">
-            {isFullscreen ? <Minimize size={15}/> : <Maximize size={15}/>}
-          </button>
+        
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 border-r border-white/10 pr-2 mr-1">
+            <button onClick={undo} title="Undo Ctrl+Z" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"><Undo2 size={15}/></button>
+            <button onClick={redo} title="Redo Ctrl+Shift+Z" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"><Redo2 size={15}/></button>
+            <button onClick={toggleFullscreen} title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all ml-1">
+              {isFullscreen ? <Minimize size={15}/> : <Maximize size={15}/>}
+            </button>
+          </div>
 
           <button onClick={exportCOCO} disabled={!anns.length}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 disabled:opacity-25 transition-all">
-            <Download size={12}/>COCO JSON
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#10b981]/20 hover:bg-[#10b981]/30 border border-[#10b981]/30 text-white disabled:opacity-25 transition-all">
+            <Download size={14}/> COCO JSON
           </button>
         </div>
       </div>
 
+      {/* ── MAIN WORKSPACE ── */}
       <div className="flex flex-1 min-h-0">
-        {/* Tool panel */}
-        <div className="w-11 flex flex-col items-center py-3 gap-1 bg-black/30 border-r border-white/5 flex-shrink-0">
+        
+        {/* ── LEFT TOOL PANEL (Glass) ── */}
+        <div className="w-14 flex flex-col items-center py-4 gap-2 bg-white/5 border-r border-white/5 flex-shrink-0 z-10 backdrop-blur-md">
           {TOOLS.map(({id,Icon,tip})=>(
             <button key={id} title={tip} onClick={()=>setTool(id)}
-              className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all
-                ${tool===id?'bg-accent text-white shadow-lg shadow-accent/30':'text-slate-500 hover:text-white hover:bg-white/10'}`}>
-              <Icon size={15}/>
+              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all duration-200
+                ${tool===id ? 'bg-[#3b82f6] text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}>
+              <Icon size={16}/>
             </button>
           ))}
 
-          {(tool==='brush'||tool==='eraser')&&<>
-            <div className="w-6 h-px bg-white/10 my-1"/>
-            <p className="text-[8px] text-slate-600 uppercase tracking-wide">Size</p>
-            {BRUSH_SIZES.map(s=>(
-              <button key={s} onClick={()=>setBrushSz(s)} title={`${s}px`}
-                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all
-                  ${brushSz===s?'bg-white/15 ring-1 ring-white/30':'hover:bg-white/5'}`}>
-                <div className="rounded-full bg-slate-400 transition-all" style={{width:Math.max(3,s/5),height:Math.max(3,s/5),backgroundColor:brushSz===s?'white':'#94a3b8'}}/>
-              </button>
-            ))}
-          </>}
+          {(tool==='brush'||tool==='eraser') && (
+            <>
+              <div className="w-6 h-px bg-white/10 my-2"/>
+              <p className="text-[9px] text-slate-500 uppercase tracking-widest font-bold mb-1">Size</p>
+              {BRUSH_SIZES.map(s=>(
+                <button key={s} onClick={()=>setBrushSz(s)} title={`${s}px`}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all
+                    ${brushSz===s ? 'bg-white/15 ring-1 ring-white/30' : 'hover:bg-white/5'}`}>
+                  <div className="rounded-full bg-slate-400 transition-all" style={{width:Math.max(4,s/4),height:Math.max(4,s/4),backgroundColor:brushSz===s?'white':'#94a3b8'}}/>
+                </button>
+              ))}
+            </>
+          )}
 
           <div className="flex-1"/>
           <button onClick={()=>{const nz=Math.min(12,rZ.current*1.25);rZ.current=nz;setZoom(nz);render();}} title="Zoom in +"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-all"><ZoomIn size={13}/></button>
+            className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-all"><ZoomIn size={16}/></button>
           <button onClick={()=>{const nz=Math.max(.05,rZ.current*.8);rZ.current=nz;setZoom(nz);render();}} title="Zoom out -"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-all"><ZoomOut size={13}/></button>
+            className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-all"><ZoomOut size={16}/></button>
           <button onClick={fitView} title="Fit to view"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-all">
-            <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <rect x="1" y="1" width="4.5" height="4.5" rx="1"/><rect x="8.5" y="1" width="4.5" height="4.5" rx="1"/>
-              <rect x="1" y="8.5" width="4.5" height="4.5" rx="1"/><rect x="8.5" y="8.5" width="4.5" height="4.5" rx="1"/>
-            </svg>
+            className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-all">
+            <Maximize size={15}/>
           </button>
         </div>
 
-        {/* Canvas */}
-        <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[#07070f]"
+        {/* ── CENTER CANVAS (Sunken Depth) ── */}
+        <div ref={containerRef} 
+          className="flex-1 relative overflow-hidden bg-[#000] shadow-[inset_0_0_50px_rgba(0,0,0,0.8)]"
           style={{cursor:cursors[tool]||'default'}}
           onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
           onDoubleClick={onDbl} onWheel={onWheel} onContextMenu={e=>e.preventDefault()}
-          onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();loadImg(e.dataTransfer.files[0]);}}
+          onDragOver={e=>e.preventDefault()} 
+          onDrop={e=>{
+            e.preventDefault();
+            if(e.dataTransfer.files.length) loadImg(e.dataTransfer.files[0]);
+          }}
         >
-          {!imgInfo&&(
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none">
-              <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/8 flex items-center justify-center">
-                <ImgIcon size={28} className="text-slate-700"/>
+          {/* THE FIX: Replaced custom empty state with the global UploadZone */}
+          {!imgInfo && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-auto z-10 px-8">
+              <div className="w-full max-w-xl">
+                <UploadZone 
+                  onFilesSelected={(files) => { if(files?.length) loadImg(files[0]); }}
+                  accept="image/png, image/jpeg, image/webp"
+                  multiple={false}
+                  title="Load Dataset Image"
+                  subtitle="Drop an image here to begin annotating"
+                />
+                <div className="mt-8 flex justify-center gap-8 text-[11px] text-slate-500 font-mono">
+                  <span>B · Box</span>
+                  <span>P · Polygon</span>
+                  <span>Space · Pan</span>
+                </div>
               </div>
-              <p className="text-sm text-slate-600">Drop an image or click Load to begin</p>
-              <p className="text-[11px] text-slate-700">B · P · N · E  for tools  ·  Scroll to zoom  ·  Space+drag to pan</p>
             </div>
           )}
-          <canvas ref={canvasRef} className="absolute inset-0"/>
-
-          {!imgInfo&&(
-            <label className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-blue-500 text-white text-sm font-semibold rounded-xl cursor-pointer shadow-xl shadow-accent/20 transition-all z-10">
-              <Upload size={15}/>Load Image
-              <input type="file" accept="image/*" className="hidden" onChange={e=>loadImg(e.target.files[0])}/>
-            </label>
-          )}
+          
+          <canvas ref={canvasRef} className="absolute inset-0 z-0"/>
 
           {tool==='polygon'&&polyLen>0&&(
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/75 border border-white/10 rounded-full text-xs text-slate-400 pointer-events-none backdrop-blur-sm">
-              {polyLen} pts · double-click or click ● to close · Esc to cancel
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-[#050505]/90 border border-white/10 rounded-full text-xs text-slate-300 pointer-events-none backdrop-blur-md shadow-2xl z-20">
+              <span className="font-bold text-white mr-2">{polyLen} pts</span> · double-click or click start to close · Esc to cancel
             </div>
           )}
         </div>
 
-        {/* Right panel */}
-        <div className="w-52 flex flex-col bg-black/30 border-l border-white/5 flex-shrink-0 min-h-0">
+        {/* ── RIGHT PANEL (Glass Properties) ── */}
+        <div className="w-72 flex flex-col bg-white/5 border-l border-white/5 flex-shrink-0 min-h-0 z-10 backdrop-blur-md">
 
-          {/* Labels */}
+          {/* Labels Section */}
           <div className="flex-shrink-0 border-b border-white/5">
-            <div className="px-3 py-2"><p className="text-[10px] uppercase tracking-widest text-slate-600">Labels</p></div>
-            <div className="px-2 space-y-0.5 max-h-40 overflow-y-auto pb-1">
+            <div className="px-4 py-3 border-b border-white/5 bg-black/20">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Labels</p>
+            </div>
+            <div className="px-3 space-y-1 max-h-48 overflow-y-auto py-3 custom-scrollbar">
               {labels.map(l=>(
                 <button key={l.id} onClick={()=>setActLbl(l.id)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all text-left
-                    ${actLbl===l.id?'bg-white/10':'hover:bg-white/5'}`}>
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{backgroundColor:l.color}}/>
-                  <span className="text-xs text-slate-300 flex-1 truncate">{l.name}</span>
-                  {actLbl===l.id&&<div className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0"/>}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-left border
+                    ${actLbl===l.id ? 'bg-white/10 border-white/10 shadow-sm' : 'border-transparent hover:bg-white/5'}`}>
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{backgroundColor:l.color}}/>
+                  <span className={`text-sm flex-1 truncate ${actLbl===l.id ? 'text-white font-semibold' : 'text-slate-300'}`}>{l.name}</span>
                 </button>
               ))}
             </div>
-            <div className="px-2 py-2 flex gap-1">
+            <div className="px-3 py-3 border-t border-white/5 bg-black/10 flex gap-2">
               <input value={newLbl} onChange={e=>setNewLbl(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addLabel()}
-                placeholder="Add label…"
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-white/20 min-w-0"/>
+                placeholder="Add new label…"
+                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-[#3b82f6]/50 transition-colors min-w-0"/>
               <button onClick={addLabel} disabled={!newLbl.trim()}
-                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0 transition-all">
-                <Plus size={12}/>
+                className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0 transition-all">
+                <Plus size={16}/>
               </button>
             </div>
           </div>
 
-          {/* Annotations list */}
+          {/* Annotations List */}
           <div className="flex flex-col flex-1 min-h-0">
-            <div className="px-3 py-2 flex items-center justify-between flex-shrink-0">
-              <p className="text-[10px] uppercase tracking-widest text-slate-600">Annotations ({anns.length})</p>
-              {anns.length>0&&(
+            <div className="px-4 py-3 flex items-center justify-between flex-shrink-0 border-b border-white/5 bg-black/20">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Annotations</p>
+              {anns.length>0 && (
                 <button onClick={()=>{pushH(anns);rAnns.current=[];setAnns([]);setSelId(null);}}
-                  className="text-[10px] text-slate-600 hover:text-red-400 transition-colors">Clear</button>
+                  className="text-[10px] font-bold text-slate-500 hover:text-red-400 transition-colors">CLEAR ALL</button>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-              {anns.length===0&&<p className="text-[10px] text-slate-700 text-center pt-6">No annotations yet</p>}
+            <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
+              {anns.length===0 && <p className="text-xs text-slate-600 font-medium text-center pt-8">No annotations yet</p>}
               {[...anns].reverse().map(a=>(
                 <div key={a.id} onClick={()=>setSelId(s=>s===a.id?null:a.id)}
-                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all group
-                    ${selId===a.id?'bg-white/10 ring-1 ring-white/15':'hover:bg-white/5'}`}>
-                  <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{backgroundColor:a.color}}/>
+                  className={`flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-all group border
+                    ${selId===a.id ? 'bg-white/10 border-white/10 shadow-sm' : 'border-transparent hover:bg-white/5'}`}>
+                  <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{backgroundColor:a.color}}/>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-slate-300 truncate leading-tight">{a.label}</p>
-                    <p className="text-[9px] text-slate-600 capitalize">{a.type}</p>
+                    <p className={`text-sm truncate leading-tight ${selId===a.id ? 'text-white font-medium' : 'text-slate-300'}`}>{a.label}</p>
+                    <p className="text-[10px] text-slate-500 font-mono capitalize mt-0.5">{a.type}</p>
                   </div>
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <button onClick={ev=>{ev.stopPropagation();setAnns(p=>p.map(x=>x.id===a.id?{...x,visible:!x.visible}:x));}}
-                      className="p-0.5 text-slate-500 hover:text-white transition-colors">
-                      {a.visible?<Eye size={11}/>:<EyeOff size={11}/>}
+                      className="p-1.5 text-slate-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+                      {a.visible ? <Eye size={14}/> : <EyeOff size={14}/>}
                     </button>
                     <button onClick={ev=>{
                       ev.stopPropagation();pushH(anns);
                       const next=anns.filter(x=>x.id!==a.id);
                       rAnns.current=next;setAnns(next);
                       if(selId===a.id){rSel.current=null;setSelId(null);}
-                    }} className="p-0.5 text-slate-500 hover:text-red-400 transition-colors"><Trash2 size={11}/></button>
+                    }} className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={14}/></button>
                   </div>
                 </div>
               ))}
